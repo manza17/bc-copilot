@@ -1,3 +1,5 @@
 openai>=1.0
 python-dotenv
 numpy
+azure-ai-projects
+azure-identity

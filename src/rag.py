@@ -2,17 +2,10 @@ import glob
 import os
 
 import numpy as np
-from dotenv import load_dotenv
-from openai import OpenAI
 
-load_dotenv()
+from provider import get_client, CHAT_MODEL, EMBED_MODEL
 
-client = OpenAI(
-    base_url=os.environ["OPENAI_BASE_URL"],
-    api_key=os.environ["OPENAI_API_KEY"],
-)
-CHAT_MODEL = os.environ.get("MODEL", "llama3.1")
-EMBED_MODEL = os.environ.get("EMBED_MODEL", "nomic-embed-text")
+client = get_client()
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
 
