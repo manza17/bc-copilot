@@ -3,3 +3,4 @@ python-dotenv
 numpy
 azure-ai-projects
 azure-identity
+azure-search-documents

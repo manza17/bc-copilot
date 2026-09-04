@@ -1,16 +1,42 @@
+"""
+BC Copilot — RAG sobre Azure AI Search (Fase 1B)
+load_documents / chunk_document / embed se mantienen (los usa ingest.py).
+retrieve ahora consulta el indice de AI Search (busqueda hibrida) en vez de numpy.
+"""
 import glob
 import os
 
 import numpy as np
+from dotenv import load_dotenv
+from azure.search.documents import SearchClient
+from azure.search.documents.models import VectorizedQuery
 
 from provider import get_client, CHAT_MODEL, EMBED_MODEL
+
+load_dotenv()
 
 client = get_client()
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
 
+def _search_credential():
+    key = os.environ.get("AZURE_SEARCH_KEY")
+    if key:
+        from azure.core.credentials import AzureKeyCredential
+        return AzureKeyCredential(key)
+    from azure.identity import DefaultAzureCredential
+    return DefaultAzureCredential()
+
+
+search_client = SearchClient(
+    os.environ["AZURE_SEARCH_ENDPOINT"],
+    os.environ.get("AZURE_SEARCH_INDEX", "bc-docs"),
+    credential=_search_credential(),
+)
+
+
+# --- Estas tres funciones NO cambian: las reusa ingest.py ---
 def load_documents(data_dir):
-    """Lee todos los .md y .txt de la carpeta data/."""
     docs = []
     paths = glob.glob(os.path.join(data_dir, "*.md")) + glob.glob(os.path.join(data_dir, "*.txt"))
     for path in paths:
@@ -20,11 +46,10 @@ def load_documents(data_dir):
 
 
 def chunk_document(doc, size=500, overlap=100):
-    """Parte un documento en trozos con solapamiento, para no cortar ideas al medio."""
     text = doc["text"]
     chunks, start = [], 0
     while start < len(text):
-        piece = text[start : start + size].strip()
+        piece = text[start:start + size].strip()
         if piece:
             chunks.append({"source": doc["source"], "text": piece})
         start += size - overlap
@@ -32,50 +57,41 @@ def chunk_document(doc, size=500, overlap=100):
 
 
 def embed(texts):
-    """Convierte una lista de textos en vectores usando el modelo de embeddings."""
     resp = client.embeddings.create(model=EMBED_MODEL, input=texts)
     return np.array([d.embedding for d in resp.data])
 
 
-def build_index(data_dir=DATA_DIR):
-    """Carga, trocea y vectoriza todos los documentos. Devuelve chunks + matriz normalizada."""
-    docs = load_documents(data_dir)
-    chunks = [c for doc in docs for c in chunk_document(doc)]
-    if not chunks:
-        raise RuntimeError(f"No encontré documentos en {data_dir}")
-    vectors = embed([c["text"] for c in chunks])
-    vectors = vectors / np.linalg.norm(vectors, axis=1, keepdims=True)  # normalizar
-    return chunks, vectors
+# --- retrieve: ahora consulta AI Search en vez de calcular sobre numpy ---
+def retrieve(question, k=3):
+    q_vector = embed([question])[0].tolist()
+    vector_query = VectorizedQuery(
+        vector=q_vector, k_nearest_neighbors=k, fields="contentVector"
+    )
+    results = search_client.search(
+        search_text=question,            # BM25 (palabra clave)
+        vector_queries=[vector_query],   # HNSW (vectorial)  -> juntas = hibrida
+        select=["content", "source"],    # contentVector no vuelve (es hidden)
+        top=k,
+    )
+    return [{"text": r["content"], "source": r["source"]} for r in results]
 
 
-def retrieve(question, chunks, vectors, k=3):
-    """Devuelve los k trozos más parecidos a la pregunta (similitud coseno)."""
-    q = embed([question])[0]
-    q = q / np.linalg.norm(q)
-    sims = vectors @ q
-    top = np.argsort(sims)[::-1][:k]
-    return [chunks[i] for i in top]
-
-
-def answer(question, chunks, vectors, k=3):
-    hits = retrieve(question, chunks, vectors, k)
+def answer(question, k=3):
+    hits = retrieve(question, k)
     context = "\n\n".join(
         f"[{i + 1}] (fuente: {h['source']})\n{h['text']}" for i, h in enumerate(hits)
     )
     prompt = (
-        "Respondé la pregunta usando SOLO el contexto de abajo. "
-        "Citá la fuente con su número entre corchetes, por ejemplo [1]. "
-        "Si el contexto no alcanza, decí que no figura en la documentación.\n\n"
+        "Responde la pregunta usando SOLO el contexto de abajo. "
+        "Cita la fuente con su numero entre corchetes, por ejemplo [1]. "
+        "Si el contexto no alcanza, deci que no figura en la documentacion.\n\n"
         f"CONTEXTO:\n{context}\n\nPREGUNTA: {question}"
     )
     resp = client.chat.completions.create(
         model=CHAT_MODEL,
         messages=[
-            {
-                "role": "system",
-                "content": "Sos un asistente para consultores de Business Central. "
-                "Respondés con precisión y siempre citás las fuentes.",
-            },
+            {"role": "system", "content": "Sos un asistente para consultores de Business "
+             "Central. Respondes con precision y siempre citas las fuentes."},
             {"role": "user", "content": prompt},
         ],
     )
@@ -83,13 +99,8 @@ def answer(question, chunks, vectors, k=3):
 
 
 if __name__ == "__main__":
-    print("Indexando documentos...")
-    chunks, vectors = build_index()
-    print(f"{len(chunks)} chunks indexados.\n")
-
-    pregunta = "¿Para qué sirven los posting groups y qué tipos hay?"
-    respuesta, fuentes = answer(pregunta, chunks, vectors)
-
+    pregunta = "Para que sirven los posting groups y que tipos hay?"
+    respuesta, fuentes = answer(pregunta)
     print(f"Pregunta: {pregunta}\n")
     print("Respuesta:")
     print(respuesta)
