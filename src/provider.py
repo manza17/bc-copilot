@@ -16,7 +16,7 @@ def get_client():
         token = DefaultAzureCredential().get_token("https://ai.azure.com/.default").token
         # El token dura ~1 h; alcanza de sobra para correr el script.
         return OpenAI(
-            base_url=os.environ["AZURE_OPENAI_ENDPOINT"],  # termina en /openai/v1/
+            base_url=os.environ["AZURE_OPENAI_ENDPOINT"],  
             api_key=token,
         )
 
