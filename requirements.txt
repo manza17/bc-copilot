@@ -4,3 +4,4 @@ numpy
 azure-ai-projects
 azure-identity
 azure-search-documents
+azure-ai-documentintelligence

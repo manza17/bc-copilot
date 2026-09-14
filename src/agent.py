@@ -7,6 +7,7 @@ import json
 
 from provider import get_client, CHAT_MODEL
 from rag import retrieve
+from doc_intel import extraer_factura
 
 client = get_client()
 
@@ -19,21 +20,10 @@ def buscar_en_documentacion(query):
     return "\n\n".join(f"[fuente: {h['source']}]\n{h['text']}" for h in hits)
 
 
-# --- Herramienta 2: extraer datos de un documento (por ahora, texto pegado) ---
-def extraer_datos_de_documento(texto):
-    prompt = (
-        "Extrae los datos clave del siguiente documento (factura, reporte, etc.) "
-        "y devolvelos en JSON con las claves que correspondan "
-        "(por ejemplo: numero, fecha, proveedor, total, items). "
-        "Devolve SOLO el JSON.\n\n"
-        f"DOCUMENTO:\n{texto}"
-    )
-    resp = client.chat.completions.create(
-        model=CHAT_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},  # modo JSON: fuerza salida JSON valida
-    )
-    return resp.choices[0].message.content
+# --- Herramienta 2: extraer datos de una factura (PDF/imagen) via Document Intelligence ---
+def extraer_datos_de_documento(ruta_archivo):
+    datos = extraer_factura(ruta_archivo)
+    return json.dumps(datos, ensure_ascii=False)
 
 
 # Mapa nombre -> funcion (el loop ejecuta lo que el modelo pida, sea cual sea)
@@ -67,16 +57,18 @@ TOOL_SCHEMAS = [
         "function": {
             "name": "extraer_datos_de_documento",
             "description": (
-                "Extrae datos estructurados (numero, fecha, proveedor, total, items) de "
-                "un documento como una factura o un reporte. Usala cuando el usuario "
-                "proporcione el texto de un documento para extraer su informacion."
+                "Extrae datos estructurados de una factura (PDF o imagen) usando OCR. "
+                "Usala cuando el usuario indique la ruta de un archivo de factura."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "texto": {"type": "string", "description": "El texto del documento"}
+                    "ruta_archivo": {
+                        "type": "string",
+                        "description": "La ruta al archivo de la factura (PDF o imagen)",
+                    }
                 },
-                "required": ["texto"],
+                "required": ["ruta_archivo"],
             },
         },
     },
@@ -116,18 +108,10 @@ def run_agent(pregunta, max_turns=5):
 
 
 if __name__ == "__main__":
-    factura = (
-        "Extrae los datos de esta factura:\n\n"
-        "Factura N 0001-00004521\n"
-        "Fecha: 15/03/2026\n"
-        "Proveedor: Distribuidora del Sur SA (CUIT 30-12345678-9)\n"
-        "Item: Servicio de consultoria BC - 40 hs - $200000\n"
-        "Total: $242000 (IVA incluido)"
-    )
     for pregunta in [
-        "Para que sirven los posting groups?",   # -> buscar_en_documentacion
-        factura,                                  # -> extraer_datos_de_documento
-        "Hola, gracias por la ayuda!",            # -> ninguna herramienta
+        "Para que sirven los posting groups?",                        # -> buscar_en_documentacion
+        "Extrae los datos de la factura en data/sample-invoice.pdf",  # -> extraer_datos_de_documento
+        "Hola, gracias por la ayuda!",                                # -> ninguna herramienta
     ]:
         print(f"\nPREGUNTA: {pregunta[:60]}...")
         print(f"RESPUESTA: {run_agent(pregunta)}")
