@@ -5,3 +5,5 @@ azure-ai-projects
 azure-identity
 azure-search-documents
 azure-ai-documentintelligence
+agent-framework-core
+agent-framework-foundry

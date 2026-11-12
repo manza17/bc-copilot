@@ -40,11 +40,29 @@ def extraer_factura(file_path):
 
     datos = {}
     for doc in result.documents or []:          # normalmente 1 factura por archivo
-        for nombre, campo in (doc.fields or {}).items():
-            datos[nombre] = {
-                "valor": campo.get("content"),
-                "confianza": campo.get("confidence"),
-            }
+        for doc in result.documents or []:
+            for nombre, campo in (doc.fields or {}).items():
+                datos[nombre] = {
+                    "valor": campo.get("content"),
+                    "confianza": campo.get("confidence"),
+                }
+            items = (doc.fields or {}).get("Items")
+            if items and items.value_array:
+                lineas = []
+                for linea in items.value_array:
+                    obj = linea.value_object or {}
+                    # armá un dict con descripcion, cantidad, precio_unitario e importe
+                    # pista: Description -> .content | Quantity -> .value_number
+                    #        UnitPrice / Amount -> .value_currency.amount
+                    #        ojo: un campo puede faltar -> obj.get("Quantity")
+                    linea_dict = {
+                        "descripcion": obj.get("Description").content if obj.get("Description") else None,
+                        "cantidad": obj.get("Quantity").value_number if obj.get("Quantity") else None,
+                        "precio_unitario": obj.get("UnitPrice").value_currency.amount if obj.get("UnitPrice") else None,
+                        "importe": obj.get("Amount").value_currency.amount if obj.get("Amount") else None,
+                    }
+                    lineas.append(linea_dict)
+                datos["Items"] = lineas
     return datos
 
 

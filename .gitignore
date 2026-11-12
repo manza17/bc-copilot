@@ -4,5 +4,6 @@ venv/
 __pycache__/
 *.pyc
 data/
+scripts/
 .DS_Store
 deployments.md
